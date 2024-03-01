@@ -1,6 +1,5 @@
-import 'dart:async';
+import 'dart:convert';
 
-import 'package:hooks_riverpod/hooks_riverpod.dart';
 import 'package:local_storage_playground/models/flashlist.dart';
 import 'package:path/path.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -8,56 +7,100 @@ import 'package:sqflite/sqflite.dart';
 
 part 'db_controller.g.dart';
 
-class DBController {
+@riverpod
+class DBController extends _$DBController {
   Database? db;
 
-  Future<Database?> get getDb async {
-    db ??= await initializeDb();
-    return db;
+  @override
+  List<Flashlist> build() {
+    _initializeDb();
+    return [];
   }
 
-  Future<Database> initializeDb() async {
-    return openDatabase(
+  Future<void> _initializeDb() async {
+    db ??= await openDatabase(
       join(await getDatabasesPath(), 'flashlist.db'),
-      onCreate: createDb,
+      onCreate: _createDb,
       version: 1,
     );
+    _fetchFlashlists();
   }
 
-  Future<void> createDb(Database db, int version) async {
-    await db.execute(
-      'CREATE TABLE flashlists(id INTEGER PRIMARY KEY, title TEXT, isSent INTEGER)',
-    );
+  Future<void> _createDb(Database db, int version) async {
+    await db.execute('''
+      CREATE TABLE flashlists(
+        id INTEGER PRIMARY KEY, 
+        title TEXT, 
+        isSent INTEGER, 
+        items TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE flashlist_items(
+        id INTEGER PRIMARY KEY, 
+        flashlist_id INTEGER, 
+        item TEXT
+      )
+    ''');
   }
 
   Future<void> insertFlashlist(Flashlist flashlist) async {
-    final Database db = await getDb as Database;
+    final Database db = this.db as Database;
+    final itemsJson = jsonEncode(flashlist.items);
+
     await db.insert(
       'flashlists',
-      flashlist.toMap(),
-      conflictAlgorithm: ConflictAlgorithm.replace,
+      {
+        'id': flashlist.id,
+        'title': flashlist.title,
+        'items': itemsJson,
+      },
     );
+    _fetchFlashlists();
   }
 
-  Future<List<Flashlist>> getFlashlists() async {
-    final Database db = await getDb as Database;
-    final List<Map<String, dynamic>> maps = await db.query('flashlists');
-    return List.generate(maps.length, (i) {
+  Future<void> removeFlashlist(int id) async {
+    final Database db = this.db as Database;
+    await db.delete(
+      'flashlists',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    _fetchFlashlists();
+  }
+
+  Future<void> addItemToFlashlist(int id, String name) async {
+    final Database db = this.db as Database;
+    await db.insert(
+      'flashlist_items',
+      <String, dynamic>{
+        'flashlist_id': id,
+        'item': name,
+      },
+    );
+    _fetchFlashlists();
+  }
+
+  Future<void> _fetchFlashlists() async {
+    final Database db = this.db as Database;
+    final List<Map<String, dynamic>> flashlistMaps =
+        await db.query('flashlists');
+    final List<Map<String, dynamic>> flashlistItemsMaps =
+        await db.query('flashlist_items');
+    state = List.generate(flashlistMaps.length, (i) {
+      final items = flashlistItemsMaps
+          .where((element) {
+            return element['flashlist_id'] == flashlistMaps[i]['id'];
+          })
+          .map((e) => e['item'])
+          .toList();
+
       return Flashlist(
-        id: maps[i]['id'] as int,
-        title: maps[i]['title'] as String,
+        id: flashlistMaps[i]['id'],
+        title: flashlistMaps[i]['title'],
+        items: items,
       );
     });
   }
 }
-
-@riverpod
-DBController databaseController(Ref ref) => DBController();
-
-@riverpod
-Future<Database?> database(Ref ref) =>
-    ref.read(databaseControllerProvider).getDb;
-
-@riverpod
-Future<List<Flashlist>> flashlists(Ref ref) =>
-    ref.read(databaseControllerProvider).getFlashlists();
