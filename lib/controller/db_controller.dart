@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:local_storage_playground/models/flashlist.dart';
 import 'package:path/path.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -38,25 +36,25 @@ class DBController extends _$DBController {
 
     await db.execute('''
       CREATE TABLE flashlist_items(
-        id INTEGER PRIMARY KEY, 
-        flashlist_id INTEGER, 
-        item TEXT
+        id INTEGER PRIMARY KEY,
+        parentId INTEGER,
+        name TEXT,
+        FOREIGN KEY(parentId) REFERENCES flashlists(id)
       )
     ''');
   }
 
   Future<void> insertFlashlist(Flashlist flashlist) async {
     final Database db = this.db as Database;
-    final itemsJson = jsonEncode(flashlist.items);
 
     await db.insert(
       'flashlists',
       {
         'id': flashlist.id,
         'title': flashlist.title,
-        'items': itemsJson,
       },
     );
+
     _fetchFlashlists();
   }
 
@@ -84,23 +82,31 @@ class DBController extends _$DBController {
 
   Future<void> _fetchFlashlists() async {
     final Database db = this.db as Database;
+
+    // Query flashlists
     final List<Map<String, dynamic>> flashlistMaps =
         await db.query('flashlists');
+
+    // Query items
     final List<Map<String, dynamic>> flashlistItemsMaps =
         await db.query('flashlist_items');
-    state = List.generate(flashlistMaps.length, (i) {
-      final items = flashlistItemsMaps
-          .where((element) {
-            return element['flashlist_id'] == flashlistMaps[i]['id'];
-          })
-          .map((e) => e['item'])
-          .toList();
 
-      return Flashlist(
-        id: flashlistMaps[i]['id'],
-        title: flashlistMaps[i]['title'],
-        items: items,
-      );
-    });
+    state = List.generate(
+      flashlistMaps.length,
+      (i) {
+        final items = flashlistItemsMaps
+            .where((element) {
+              return element['flashlist_id'] == flashlistMaps[i]['id'];
+            })
+            .map((e) => e['item'])
+            .toList();
+
+        return Flashlist(
+          id: flashlistMaps[i]['id'],
+          title: flashlistMaps[i]['title'],
+          items: List<String>.from(items),
+        );
+      },
+    );
   }
 }
